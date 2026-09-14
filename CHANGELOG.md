@@ -6,7 +6,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.1.0] - Unreleased
+## [0.1.0] - 2026-09-14
 
 Initial release.
 
@@ -26,6 +26,8 @@ Initial release.
   resolve can't be computed; emptied directories are pruned but the `target/`
   root is never removed.
 - CLI flags: `--recursive`, `--dry-run`, `--verbose`, `--quiet`.
+- Rust edition 2024; minimum supported Rust version 1.85. The dev shell / Nix
+  build use the latest stable toolchain (decoupled from the MSRV).
 
 [Unreleased]: https://github.com/BoatRamp/cargo-sift/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/BoatRamp/cargo-sift/releases/tag/v0.1.0

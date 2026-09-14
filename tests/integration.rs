@@ -113,7 +113,11 @@ fn handles_cross_compilation_profile_roots() {
 
     // The dead version is reaped in BOTH roots; the live one in the cross root stays.
     assert_eq!(plan.removals.len(), 2);
-    assert!(plan.removals.iter().all(|r| r.reason == Reason::DeadVersion));
+    assert!(
+        plan.removals
+            .iter()
+            .all(|r| r.reason == Reason::DeadVersion)
+    );
     gc::execute(&plan, false, false).unwrap();
     assert!(!cross.join(".fingerprint/anyhow-bbbbbbbbbbbbbbbb").exists());
     assert!(cross.join(".fingerprint/anyhow-cccccccccccccccc").exists());

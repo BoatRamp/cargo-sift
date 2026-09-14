@@ -30,9 +30,13 @@ $ cargo build
 
 ## Contents
 
-- [Why](#why) · [How it works](#how-it-works) · [Safety](#safety)
-- [Install](#install) · [Usage](#usage) · [How it compares](#how-it-compares)
-- [Contributing](#contributing) · [License](#license)
+- [Why](#why)
+- [How it works](#how-it-works)
+- [Install](#install)
+- [Usage](#usage)
+- [How it compares](#how-it-compares)
+- [Contributing](#contributing)
+- [License](#license)
 
 ## Why
 

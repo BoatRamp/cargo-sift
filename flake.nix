@@ -25,12 +25,15 @@
           };
           inherit (pkgs) lib;
 
-          # Single source of truth: the package version and MSRV both come from
-          # Cargo.toml, so the flake never drifts from the crate metadata.
+          # The package version comes from Cargo.toml so the flake never drifts.
           cargoToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
-          msrv = cargoToml.package.rust-version;
 
-          rustToolchain = pkgs.rust-bin.stable.${msrv}.default.override {
+          # Dev shell + Nix build track the latest stable toolchain (a
+          # `nix flake update` of rust-overlay bumps it automatically). This is
+          # deliberately decoupled from the crate's MSRV (Cargo.toml
+          # `rust-version`, currently 1.85.0), which is lower and enforced
+          # separately by the `msrv` CI job.
+          rustToolchain = pkgs.rust-bin.stable.latest.default.override {
             extensions = [ "rust-src" "clippy" "rustfmt" "rust-analyzer" ];
           };
           craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
