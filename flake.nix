@@ -91,6 +91,7 @@
             packages = [
               rustToolchain
               pkgs.just
+              pkgs.gh # GitHub CLI, for releases / PRs (uses your ~/.config/gh auth)
             ];
             shellHook = ''
               echo "cargo-sift dev shell — $(rustc --version)"
