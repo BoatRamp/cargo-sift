@@ -1,0 +1,14 @@
+# Rust build artifacts
+/target
+/result
+/result-*
+
+# direnv / nix
+/.direnv
+
+# local environment overrides
+/.env
+
+# editor / OS cruft
+*.swp
+.DS_Store

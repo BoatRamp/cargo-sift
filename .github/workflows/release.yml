@@ -1,0 +1,129 @@
+# cargo-sift release pipeline. Tag `vX.Y.Z` (matching the crate version) to
+# build native binaries, publish a GitHub release with checksums + provenance,
+# and — after a human approves the `crates-io` environment — publish to crates.io.
+#
+# Mirrors the boatramp convention: each target builds on its native runner, and
+# the crates.io publish is gated on a protected environment (crates.io is
+# irreversible — names are claimed forever and releases can only be yanked).
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  # Manual dry run against a ref (builds binaries, never publishes).
+  workflow_dispatch:
+
+permissions:
+  contents: write # create the release + upload assets
+  id-token: write # OIDC for the provenance attestation
+  attestations: write
+
+jobs:
+  build:
+    name: build · ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, kind: unix }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, kind: unix }
+          - { os: macos-15-intel, target: x86_64-apple-darwin, kind: unix }
+          - { os: macos-14, target: aarch64-apple-darwin, kind: unix }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, kind: windows }
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Assemble archive + checksum
+        id: pack
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin="cargo-sift"; [ "${{ matrix.kind }}" = "windows" ] && bin="cargo-sift.exe"
+          stage="dist/cargo-sift-${{ matrix.target }}"
+          mkdir -p "$stage"
+          cp "target/${{ matrix.target }}/release/$bin" "$stage/"
+          cp README.md LICENSE-MIT LICENSE-APACHE "$stage/"
+          cd dist
+          name="cargo-sift-${{ matrix.target }}"
+          if [ "${{ matrix.kind }}" = "windows" ]; then
+            7z a "${name}.zip" "$name" >/dev/null; asset="${name}.zip"
+          else
+            tar -cJf "${name}.tar.xz" "$name"; asset="${name}.tar.xz"
+          fi
+          if command -v sha256sum >/dev/null; then sha256sum "$asset" > "${asset}.sha256";
+          else shasum -a 256 "$asset" > "${asset}.sha256"; fi
+          echo "asset=$asset" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cargo-sift-${{ matrix.target }}
+          path: |
+            dist/${{ steps.pack.outputs.asset }}
+            dist/${{ steps.pack.outputs.asset }}.sha256
+          retention-days: 5
+
+  release:
+    name: publish release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: artifacts, merge-multiple: true }
+      - name: Assemble SHA256SUMS
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          cp artifacts/cargo-sift-*.tar.xz artifacts/cargo-sift-*.zip release/ 2>/dev/null || true
+          ( cd release && cat ../artifacts/*.sha256 | sed 's# .*/# #' > SHA256SUMS && cat SHA256SUMS )
+      - name: Provenance attestation
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: "release/cargo-sift-*"
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/cargo-sift-*.tar.xz
+            release/cargo-sift-*.zip
+            release/SHA256SUMS
+          generate_release_notes: true
+
+  # Publish to crates.io. Gated three ways: only on a real `vX.Y.Z` tag push
+  # (never the workflow_dispatch dry run), only after `build` is green, and only
+  # once a human approves the `crates-io` environment (a required-reviewer rule
+  # set in repo Settings > Environments, which also holds the CRATES_IO_TOKEN
+  # secret). `just publish` is the single source of truth: it refuses unless HEAD
+  # is on an exact vX.Y.Z tag matching the crate version, and is resumable.
+  crates-io:
+    name: publish to crates.io
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    environment: crates-io
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # tags for `just publish`'s `git describe --exact-match`
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - name: Publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: just publish

@@ -1,0 +1,51 @@
+[package]
+name = "cargo-sift"
+version = "0.1.0"
+description = "Reachability GC for Cargo target/ directories — remove unreachable build artifacts (dead dependency versions, removed targets) without a full clean. Deterministic and offline."
+authors = ["Giacomo Cariello <giacomo.cariello@uranion.ai>"]
+license = "MIT OR Apache-2.0"
+categories = ["development-tools::cargo-plugins", "command-line-utilities", "filesystem"]
+keywords = ["cargo", "cargo-subcommand", "clean", "target", "cache"]
+edition = "2021"
+rust-version = "1.85.0"
+readme = "README.md"
+homepage = "https://github.com/BoatRamp/cargo-sift"
+repository = "https://github.com/BoatRamp/cargo-sift"
+documentation = "https://docs.rs/cargo-sift"
+# Keep the published crate lean: dev/CI/Nix scaffolding isn't needed to build it.
+exclude = [
+    "/.github",
+    "/flake.nix",
+    "/flake.lock",
+    "/.envrc",
+    "/Justfile",
+    "/.gitignore",
+]
+
+[badges]
+maintenance = { status = "actively-developed" }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[lib]
+name = "cargo_sift"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cargo-sift"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4.5", features = ["derive", "wrap_help"] }
+toml = "0.8"
+walkdir = "2.5"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+strip = true
