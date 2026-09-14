@@ -253,6 +253,98 @@ fn resolve_without_lockfile_fails_closed() {
     assert!(resolve::resolve(&target).is_err());
 }
 
+// --- security regressions (F1–F4 from the adversarial review) ---
+
+#[test]
+fn f1_deletes_deeply_nested_unit_without_stack_overflow() {
+    let tmp = tempfile::tempdir().unwrap();
+    let target = tmp.path().join("target");
+    let debug = make_target(&target);
+    add_registry_unit(&debug, "anyhow", "1.0.86", "bbbbbbbbbbbbbbbb");
+    // Nest a tree deep inside the dead unit's fingerprint dir. The iterative
+    // deleter walks it on the heap; the old recursive `remove_dir_all` would
+    // overflow the stack on a pathological (attacker-supplied) depth.
+    let mut deep = debug.join(".fingerprint/anyhow-bbbbbbbbbbbbbbbb");
+    for _ in 0..256 {
+        deep = deep.join("d");
+    }
+    fs::create_dir_all(&deep).unwrap();
+    fs::write(deep.join("f"), b"x").unwrap();
+
+    let live = LiveSet::new(["anyhow".into()], ["anyhow-1.0.104".into()]);
+    let plan = gc::plan(&target, &live).unwrap();
+    let stats = gc::execute(&plan, false, false).unwrap();
+    assert_eq!(stats.errors, 0);
+    assert!(!debug.join(".fingerprint/anyhow-bbbbbbbbbbbbbbbb").exists());
+}
+
+#[test]
+fn f2_empty_lockfile_fails_closed() {
+    let tmp = tempfile::tempdir().unwrap();
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    fs::write(
+        proj.join("Cargo.toml"),
+        b"[package]\nname=\"p\"\nversion=\"0.1.0\"\n",
+    )
+    .unwrap();
+    // Valid TOML, zero packages — must NOT resolve to an empty (delete-all) set.
+    fs::write(proj.join("Cargo.lock"), b"version = 4\n").unwrap();
+    assert!(resolve::resolve(&proj.join("target")).is_err());
+}
+
+#[test]
+fn f3_workspace_members_cannot_escape_the_tree() {
+    let tmp = tempfile::tempdir().unwrap();
+    // An "outside" crate (with a lib) the workspace must not reach.
+    let outside = tmp.path().join("outside");
+    fs::create_dir_all(outside.join("src")).unwrap();
+    fs::write(outside.join("src/lib.rs"), b"").unwrap();
+    fs::write(
+        outside.join("Cargo.toml"),
+        b"[package]\nname=\"secret\"\nversion=\"0.1.0\"\n",
+    )
+    .unwrap();
+    // A workspace whose members maliciously point outside the tree.
+    let ws = tmp.path().join("ws");
+    fs::create_dir_all(&ws).unwrap();
+    fs::write(
+        ws.join("Cargo.toml"),
+        b"[workspace]\nmembers = [\"../outside\"]\n[package]\nname = \"root\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    fs::write(
+        ws.join("Cargo.lock"),
+        b"[[package]]\nname = \"root\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+
+    let live = resolve::resolve(&ws.join("target")).unwrap();
+    assert!(live.name_is_live("root"));
+    // The outside member's Cargo.toml was never read, so "secret" isn't live.
+    assert!(!live.name_is_live("secret"));
+}
+
+#[test]
+fn f4_hash_collision_skips_both_units() {
+    let tmp = tempfile::tempdir().unwrap();
+    let target = tmp.path().join("target");
+    let debug = make_target(&target);
+    // A live unit and a forged "dead" unit sharing the same 16-hex hash.
+    add_registry_unit(&debug, "serde", "1.0.0", "abcabcabcabcabca");
+    let evil = debug.join(".fingerprint/evil-abcabcabcabcabca");
+    fs::create_dir_all(&evil).unwrap();
+    fs::write(evil.join("lib-evil"), b"").unwrap();
+
+    let live = LiveSet::new(["serde".into()], ["serde-1.0.0".into()]);
+    let plan = gc::plan(&target, &live).unwrap();
+    // Colliding units are skipped, so the live crate's artifact is never dragged
+    // into a removal.
+    assert!(plan.removals.is_empty());
+    gc::execute(&plan, false, false).unwrap();
+    assert!(debug.join("deps/libserde-abcabcabcabcabca.rlib").exists());
+}
+
 #[test]
 fn detects_target_dir_by_marker() {
     let tmp = tempfile::tempdir().unwrap();

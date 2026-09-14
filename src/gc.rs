@@ -230,10 +230,35 @@ pub fn execute(plan: &Plan, dry_run: bool, verbose: bool) -> Result<Stats> {
 
 fn remove_path(path: &Path) -> std::io::Result<()> {
     match fs::symlink_metadata(path) {
-        Ok(meta) if meta.is_dir() => fs::remove_dir_all(path),
+        Ok(meta) if meta.is_dir() => remove_dir_all_iterative(path),
         Ok(_) => fs::remove_file(path),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(err) => Err(err),
+    }
+}
+
+/// Depth-safe recursive delete. `std::fs::remove_dir_all` recurses per directory
+/// level and overflows the stack on a pathologically deep tree (a poisoned
+/// `target/` could carry thousands of nested dirs); `WalkDir` iterates on the
+/// heap. Yielding contents-first, we unlink files/symlinks then the emptied
+/// dirs. Symlinks are never followed, so a symlinked entry is unlinked, not its
+/// target — preserving the escape-proof semantics of the previous code.
+fn remove_dir_all_iterative(root: &Path) -> std::io::Result<()> {
+    for entry in WalkDir::new(root)
+        .contents_first(true)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
+        if entry.file_type().is_dir() {
+            let _ = fs::remove_dir(entry.path());
+        } else {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+    match fs::remove_dir(root) {
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        other => other,
     }
 }
 

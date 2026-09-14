@@ -5,6 +5,15 @@
 //! itself writes: a `CACHEDIR.TAG` with the standard cache signature, or a
 //! `.rustc_info.json`. This is the safety fence that keeps `cargo sift` from
 //! wandering into an unrelated `target/` folder.
+//!
+//! The fence is **advisory, not adversarial**: the `CACHEDIR.TAG` signature is a
+//! public constant (it's the same marker Cargo itself writes), so anyone can
+//! plant it. It exists to avoid *accidents* — mistaking an unrelated `target/`
+//! for a Cargo one — not to resist a hostile filesystem. Even so, the blast
+//! radius of a spoofed marker is confined: `cargo sift` only ever removes files
+//! whose names match the Cargo unit layout (`<profile>/.fingerprint/<pkg>-<hash>/`,
+//! the matching `deps/`/`build/` entries), never arbitrary user files, and it
+//! deletes nothing at all unless it can compute a non-empty resolve.
 
 use std::path::{Path, PathBuf};
 

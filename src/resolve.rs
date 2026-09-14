@@ -73,6 +73,17 @@ pub fn resolve(target: &Path) -> Result<LiveSet> {
     let (registry_versions, mut names) = parse_lock(&root.join("Cargo.lock"))
         .with_context(|| format!("reading {}", root.join("Cargo.lock").display()))?;
 
+    // Fail closed on a parseable-but-empty lockfile. A real Cargo.lock always
+    // lists at least the workspace members; an empty package set (truncated or
+    // hand-crafted lock) would otherwise make every artifact look unreachable
+    // and delete the lot.
+    if names.is_empty() {
+        anyhow::bail!(
+            "{} lists no packages; refusing to treat every artifact as unreachable",
+            root.join("Cargo.lock").display()
+        );
+    }
+
     for member in members(&root)? {
         if let Ok(targets) = member_targets(&member) {
             names.extend(targets);
@@ -151,14 +162,27 @@ fn members(root: &Path) -> Result<Vec<PathBuf>> {
     if dirs.is_empty() {
         dirs.push(root.to_path_buf());
     }
+    // Confine members to the workspace root. A crafted `members = ["../secret"]`
+    // or a member dir symlinked outside the tree must not make us read (or later
+    // act on) files outside the project.
+    let canonical_root = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    dirs.retain(|d| {
+        d.join("Cargo.toml").is_file()
+            && fs::canonicalize(d).is_ok_and(|c| c.starts_with(&canonical_root))
+    });
     dirs.sort();
     dirs.dedup();
     Ok(dirs)
 }
 
 /// Expand a `[workspace].members` pattern (supporting `*` as a path component)
-/// into member directories that actually hold a `Cargo.toml`.
+/// into member directories that actually hold a `Cargo.toml`. Patterns are
+/// confined to the workspace subtree: a `..` component (traversal up) rejects
+/// the whole pattern.
 fn expand_member_glob(root: &Path, pattern: &str) -> Vec<PathBuf> {
+    if pattern.split('/').any(|c| c == "..") {
+        return Vec::new();
+    }
     let mut current = vec![root.to_path_buf()];
     for component in pattern.split('/').filter(|c| !c.is_empty()) {
         let mut next = Vec::new();

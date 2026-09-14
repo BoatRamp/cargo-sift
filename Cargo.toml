@@ -1,6 +1,6 @@
 [package]
 name = "cargo-sift"
-version = "0.1.0"
+version = "0.1.1"
 description = "Reachability GC for Cargo target/ directories — remove unreachable build artifacts (dead dependency versions, removed targets) without a full clean. Deterministic and offline."
 authors = ["Giacomo Cariello <giacomo.cariello@uranion.ai>"]
 license = "MIT OR Apache-2.0"

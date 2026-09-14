@@ -124,6 +124,15 @@ fn collect_profile_units(root: &Path, units: &mut Vec<Unit>) -> Result<()> {
         Ok(entries) => entries,
         Err(_) => return Ok(()),
     };
+
+    // First pass: collect fingerprint dirs and count hashes. A 16-hex metadata
+    // hash is unique per unit in a real target/, so a hash shared by two
+    // fingerprint dirs means a forged/corrupt tree trying to make one unit
+    // inherit another's deps files. We skip every colliding unit (deleting
+    // neither), so a live unit's artifacts can't be dragged into a dead one's
+    // removal.
+    let mut fingerprints: Vec<(String, String, PathBuf)> = Vec::new();
+    let mut hash_counts: HashMap<String, usize> = HashMap::new();
     for entry in entries.flatten() {
         if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
             continue;
@@ -131,9 +140,17 @@ fn collect_profile_units(root: &Path, units: &mut Vec<Unit>) -> Result<()> {
         let Some((pkg_name, hash)) = entry.file_name().to_str().and_then(split_name_hash) else {
             continue;
         };
+        *hash_counts.entry(hash.clone()).or_default() += 1;
+        fingerprints.push((pkg_name, hash, entry.path()));
+    }
+
+    for (pkg_name, hash, fp_path) in fingerprints {
+        if hash_counts.get(&hash).copied().unwrap_or(0) > 1 {
+            continue;
+        }
 
         // Gather this unit's paths: fingerprint dir + deps files + build dir.
-        let mut paths = vec![entry.path()];
+        let mut paths = vec![fp_path.clone()];
         if let Some(deps) = deps_by_hash.get(&hash) {
             paths.extend(deps.iter().cloned());
         }
@@ -142,7 +159,7 @@ fn collect_profile_units(root: &Path, units: &mut Vec<Unit>) -> Result<()> {
             paths.push(build_dir.clone());
         }
 
-        let kind = classify(&entry.path());
+        let kind = classify(&fp_path);
         let version = resolve_version(&pkg_name, &paths, &build_dir);
         let bytes = measure(&paths);
 
